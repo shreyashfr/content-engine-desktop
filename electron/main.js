@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net, session } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -109,48 +109,65 @@ async function startFrontendServer() {
 }
 
 // ─── LinkedIn API helpers ───────────────────────────────────────────────────
-function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }, redirectCount = 0) {
-  const https = require('https');
-  const parsed = new URL(url);
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: parsed.hostname,
-      path: parsed.pathname + parsed.search,
-      method,
-      headers: {
-        'cookie': `li_at=${li_at}; JSESSIONID="${jsessionid}"`,
-        'csrf-token': jsessionid,
-        'accept': 'application/vnd.linkedin.normalized+json+2.1',
-        'x-restli-protocol-version': '2.0.0',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      },
-    };
-    if (body) {
-      options.headers['content-type'] = contentType || 'application/json';
-      if (typeof body === 'string') options.headers['content-length'] = Buffer.byteLength(body);
-      else options.headers['content-length'] = body.length;
-    }
-    const req = https.request(options, (res) => {
-      // Follow redirects (up to 5)
-      if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) && res.headers.location && redirectCount < 5) {
-        const redirectUrl = res.headers.location.startsWith('http') ? res.headers.location : `https://${parsed.hostname}${res.headers.location}`;
-        console.log(`[linkedin] Redirect ${res.statusCode} -> ${redirectUrl}`);
-        resolve(linkedInRequest(method, redirectUrl, { li_at, jsessionid, body, contentType }, redirectCount + 1));
-        return;
-      }
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => {
-        const raw = Buffer.concat(chunks).toString();
-        console.log(`[linkedin] ${method} ${parsed.pathname} -> ${res.statusCode} (${raw.length} bytes)`);
-        try { resolve({ status: res.statusCode, data: JSON.parse(raw) }); }
-        catch { resolve({ status: res.statusCode, data: raw }); }
-      });
+// Uses Electron's net module (Chromium network stack) — real Chrome TLS fingerprint,
+// indistinguishable from a normal Chrome browser to LinkedIn's bot detection.
+async function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }) {
+  // Set LinkedIn cookies on the dedicated partition so Chromium sends them natively
+  const ses = session.fromPartition('linkedin-api');
+  const cookies = ses.cookies;
+
+  // Set cookies for both www.linkedin.com and api.linkedin.com
+  for (const domain of ['https://www.linkedin.com', 'https://api.linkedin.com']) {
+    await cookies.set({
+      url: domain,
+      name: 'li_at',
+      value: li_at,
+      domain: '.linkedin.com',
+      path: '/',
+      httpOnly: true,
+      secure: true,
     });
-    req.on('error', reject);
-    if (body) req.write(body);
-    req.end();
-  });
+    await cookies.set({
+      url: domain,
+      name: 'JSESSIONID',
+      value: `"${jsessionid}"`,
+      domain: '.linkedin.com',
+      path: '/',
+      secure: true,
+    });
+  }
+
+  const headers = {
+    'csrf-token': jsessionid,
+    'accept': 'application/vnd.linkedin.normalized+json+2.1',
+    'x-restli-protocol-version': '2.0.0',
+    'x-li-lang': 'en_US',
+    'x-li-track': JSON.stringify({
+      clientVersion: '1.13.8920', mpVersion: '1.13.8920', osName: 'web',
+      timezoneOffset: -5.5, timezone: 'Asia/Kolkata', deviceFormFactor: 'DESKTOP',
+      mpName: 'voyager-web', displayDensity: 1, displayWidth: 1920, displayHeight: 1080
+    }),
+  };
+
+  if (body) {
+    headers['content-type'] = contentType || 'application/json';
+  }
+
+  const fetchOptions = { method, headers, session: ses, bypassCustomProtocolHandlers: true };
+  if (body) {
+    fetchOptions.body = typeof body === 'string' ? body : body;
+  }
+
+  console.log(`[linkedin] ${method} ${url}`);
+  const resp = await net.fetch(url, fetchOptions);
+  const raw = await resp.text();
+  console.log(`[linkedin] ${method} ${new URL(url).pathname} -> ${resp.status} (${raw.length} bytes)`);
+
+  let data;
+  try { data = JSON.parse(raw); }
+  catch { data = raw; }
+
+  return { status: resp.status, data };
 }
 
 // ─── Extract person URN from Voyager /me response ───────────────────────────
@@ -180,9 +197,10 @@ function extractPersonUrn(data) {
 }
 
 // ─── IPC: Validate LinkedIn token ───────────────────────────────────────────
-ipcMain.handle('linkedin:validate', async (_event, { li_at }) => {
+ipcMain.handle('linkedin:validate', async (_event, { li_at, jsessionid }) => {
   try {
-    const res = await linkedInRequest('GET', 'https://www.linkedin.com/voyager/api/me', { li_at, jsessionid: 'ajax:0' });
+    const csrf = jsessionid || 'ajax:0';
+    const res = await linkedInRequest('GET', 'https://www.linkedin.com/voyager/api/me', { li_at, jsessionid: csrf });
     console.log('[linkedin] validate status:', res.status);
     const isString = typeof res.data === 'string';
     console.log('[linkedin] response type:', isString ? 'string' : 'json', isString ? res.data.substring(0, 200) : JSON.stringify(Object.keys(res.data || {})));
@@ -198,7 +216,7 @@ ipcMain.handle('linkedin:validate', async (_event, { li_at }) => {
     const lastName = mini.lastName || '';
     return {
       valid: true,
-      jsessionid: 'ajax:0',
+      jsessionid: csrf,
       profileName: `${firstName} ${lastName}`.trim() || 'Connected',
       profileId: mini.entityUrn || profile.plainId || personUrn || '',
       personUrn: personUrn || '',
