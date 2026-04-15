@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 
 let mainWindow, splashWindow;
-const FRONTEND_PORT = 15100;
+let FRONTEND_PORT = 15100;
 
 // ─── Path helpers ───────────────────────────────────────────────────────────
 function getFrontendDir() {
@@ -83,8 +83,26 @@ async function installChromium() {
   });
 }
 
+// ─── Find an available port ─────────────────────────────────────────────────
+function findAvailablePort(startPort) {
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    const tester = net.createServer();
+    tester.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(findAvailablePort(startPort + 1));
+      } else {
+        reject(err);
+      }
+    });
+    tester.listen(startPort, '127.0.0.1', () => {
+      tester.close(() => resolve(startPort));
+    });
+  });
+}
+
 // ─── Serve React frontend ───────────────────────────────────────────────────
-function startFrontendServer() {
+async function startFrontendServer() {
   const distDir = getFrontendDir();
 
   const mimeTypes = {
@@ -94,28 +112,31 @@ function startFrontendServer() {
     '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
   };
 
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      let filePath = path.join(distDir, req.url === '/' ? 'index.html' : req.url.split('?')[0]);
+  FRONTEND_PORT = await findAvailablePort(FRONTEND_PORT);
 
-      if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-        filePath = path.join(distDir, 'index.html');
+  const server = http.createServer((req, res) => {
+    let filePath = path.join(distDir, req.url === '/' ? 'index.html' : req.url.split('?')[0]);
+
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      filePath = path.join(distDir, 'index.html');
+    }
+
+    const ext = path.extname(filePath);
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        res.end('Not found');
+      } else {
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(data);
       }
-
-      const ext = path.extname(filePath);
-      const contentType = mimeTypes[ext] || 'application/octet-stream';
-
-      fs.readFile(filePath, (err, data) => {
-        if (err) {
-          res.writeHead(404);
-          res.end('Not found');
-        } else {
-          res.writeHead(200, { 'Content-Type': contentType });
-          res.end(data);
-        }
-      });
     });
+  });
 
+  return new Promise((resolve, reject) => {
+    server.on('error', reject);
     server.listen(FRONTEND_PORT, '127.0.0.1', () => {
       console.log(`Frontend serving on http://127.0.0.1:${FRONTEND_PORT}`);
       resolve(server);
