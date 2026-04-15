@@ -147,25 +147,27 @@ function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }) 
 
 // ─── Extract person URN from Voyager /me response ───────────────────────────
 function extractPersonUrn(data) {
-  // Try miniProfile.entityUrn (most common)
-  const urn = data.miniProfile?.entityUrn || data.entityUrn || data.publicIdentifier || '';
-  // urn:li:fs_miniProfile:ACoAAxxxxxx or urn:li:member:xxxxx
-  const match = urn.match(/urn:li:(?:fs_miniProfile|member):(.+)/);
-  if (match) return `urn:li:person:${match[1]}`;
-  // Try included entities
-  if (data.included) {
-    for (const entity of data.included) {
-      const eUrn = entity.entityUrn || entity['$id'] || '';
-      const eMatch = eUrn.match(/urn:li:(?:fs_miniProfile|member):(.+)/);
-      if (eMatch) return `urn:li:person:${eMatch[1]}`;
-    }
+  // Deep search: stringify and find URN pattern directly
+  const str = JSON.stringify(data);
+  // Look for fs_miniProfile URN (most reliable)
+  const miniMatch = str.match(/urn:li:fs_miniProfile:([A-Za-z0-9_-]+)/);
+  if (miniMatch) return `urn:li:person:${miniMatch[1]}`;
+  // Look for member URN
+  const memberMatch = str.match(/urn:li:member:([A-Za-z0-9_-]+)/);
+  if (memberMatch) return `urn:li:person:${memberMatch[1]}`;
+  // Try nested paths: data.data.miniProfile, data.miniProfile, etc.
+  const profile = data.data || data;
+  if (profile.miniProfile?.entityUrn) {
+    const m = profile.miniProfile.entityUrn.match(/urn:li:(?:fs_miniProfile|member):(.+)/);
+    if (m) return `urn:li:person:${m[1]}`;
   }
-  // Try plainId directly
-  if (data.plainId) return `urn:li:person:${data.plainId}`;
-  if (data.miniProfile?.objectUrn) {
-    const oMatch = data.miniProfile.objectUrn.match(/urn:li:member:(.+)/);
-    if (oMatch) return `urn:li:person:${oMatch[1]}`;
+  if (profile.miniProfile?.objectUrn) {
+    const m = profile.miniProfile.objectUrn.match(/urn:li:member:(.+)/);
+    if (m) return `urn:li:person:${m[1]}`;
   }
+  // Fallback: plainId
+  const plainId = profile.plainId || data.plainId;
+  if (plainId) return `urn:li:person:${plainId}`;
   return null;
 }
 
@@ -173,18 +175,22 @@ function extractPersonUrn(data) {
 ipcMain.handle('linkedin:validate', async (_event, { li_at }) => {
   try {
     const res = await linkedInRequest('GET', 'https://www.linkedin.com/voyager/api/me', { li_at, jsessionid: 'ajax:0' });
+    console.log('[linkedin] validate status:', res.status);
+    console.log('[linkedin] response keys:', JSON.stringify(Object.keys(res.data || {})));
     if (res.status !== 200) return { valid: false, error: 'Invalid or expired token' };
-    const profile = res.data;
-    console.log('[linkedin] /me response keys:', JSON.stringify(Object.keys(profile)));
-    console.log('[linkedin] miniProfile:', JSON.stringify(profile.miniProfile || 'none'));
-    const personUrn = extractPersonUrn(profile);
-    const firstName = profile.miniProfile?.firstName || profile.plainId || '';
-    const lastName = profile.miniProfile?.lastName || '';
+    const raw = res.data;
+    const profile = raw.data || raw; // handle normalized wrapper
+    const mini = profile.miniProfile || {};
+    console.log('[linkedin] miniProfile:', JSON.stringify(mini));
+    const personUrn = extractPersonUrn(raw);
+    console.log('[linkedin] extracted personUrn:', personUrn);
+    const firstName = mini.firstName || profile.plainId || '';
+    const lastName = mini.lastName || '';
     return {
       valid: true,
       jsessionid: 'ajax:0',
       profileName: `${firstName} ${lastName}`.trim() || 'Connected',
-      profileId: profile.miniProfile?.entityUrn || profile.plainId || '',
+      profileId: mini.entityUrn || profile.plainId || personUrn || '',
       personUrn: personUrn || '',
     };
   } catch (err) {
