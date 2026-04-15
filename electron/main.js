@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -112,65 +112,57 @@ async function startFrontendServer() {
 }
 
 // ─── LinkedIn API helpers ───────────────────────────────────────────────────
-// Uses Electron's net module (Chromium network stack) — real Chrome TLS fingerprint,
+// Uses Electron's net.request (Chromium network stack) — real Chrome TLS fingerprint,
 // indistinguishable from a normal Chrome browser to LinkedIn's bot detection.
-async function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }) {
-  // Set LinkedIn cookies on the dedicated partition so Chromium sends them natively
-  const ses = session.fromPartition('linkedin-api');
-  const cookies = ses.cookies;
+function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }) {
+  return new Promise((resolve, reject) => {
+    const request = net.request({ method, url, redirect: 'follow' });
 
-  // Set cookies for both www.linkedin.com and api.linkedin.com
-  for (const domain of ['https://www.linkedin.com', 'https://api.linkedin.com']) {
-    await cookies.set({
-      url: domain,
-      name: 'li_at',
-      value: li_at,
-      domain: '.linkedin.com',
-      path: '/',
-      httpOnly: true,
-      secure: true,
-    });
-    await cookies.set({
-      url: domain,
-      name: 'JSESSIONID',
-      value: `"${jsessionid}"`,
-      domain: '.linkedin.com',
-      path: '/',
-      secure: true,
-    });
-  }
-
-  const headers = {
-    'csrf-token': jsessionid,
-    'accept': 'application/vnd.linkedin.normalized+json+2.1',
-    'x-restli-protocol-version': '2.0.0',
-    'x-li-lang': 'en_US',
-    'x-li-track': JSON.stringify({
+    // Set headers — cookie header carries auth, csrf-token prevents CSRF check
+    request.setHeader('cookie', `li_at=${li_at}; JSESSIONID="${jsessionid}"`);
+    request.setHeader('csrf-token', jsessionid);
+    request.setHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
+    request.setHeader('x-restli-protocol-version', '2.0.0');
+    request.setHeader('x-li-lang', 'en_US');
+    request.setHeader('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+    request.setHeader('x-li-track', JSON.stringify({
       clientVersion: '1.13.8920', mpVersion: '1.13.8920', osName: 'web',
       timezoneOffset: -5.5, timezone: 'Asia/Kolkata', deviceFormFactor: 'DESKTOP',
       mpName: 'voyager-web', displayDensity: 1, displayWidth: 1920, displayHeight: 1080
-    }),
-  };
+    }));
 
-  if (body) {
-    headers['content-type'] = contentType || 'application/json';
-  }
+    if (body) {
+      request.setHeader('content-type', contentType || 'application/json');
+    }
 
-  const fetchOptions = { method, headers, session: ses, bypassCustomProtocolHandlers: true };
-  if (body) {
-    fetchOptions.body = typeof body === 'string' ? body : body;
-  }
+    console.log(`[linkedin] ${method} ${url}`);
 
-  console.log(`[linkedin] ${method} ${url}`);
-  const resp = await net.fetch(url, fetchOptions);
-  const raw = await resp.text();
-  console.log(`[linkedin] ${method} ${new URL(url).pathname} -> ${resp.status} (${raw.length} bytes)`);
+    request.on('response', (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const raw = Buffer.concat(chunks).toString();
+        const pathname = new URL(url).pathname;
+        console.log(`[linkedin] ${method} ${pathname} -> ${response.statusCode} (${raw.length} bytes)`);
 
-  let data;
-  try { data = JSON.parse(raw); }
-  catch { data = raw; }
+        let data;
+        try { data = JSON.parse(raw); }
+        catch { data = raw; }
 
-  return { status: resp.status, data };
+        resolve({ status: response.statusCode, data });
+      });
+    });
+
+    request.on('error', (err) => {
+      console.error(`[linkedin] ${method} ${url} error:`, err.message);
+      reject(err);
+    });
+
+    if (body) {
+      request.write(typeof body === 'string' ? body : body);
+    }
+    request.end();
+  });
 }
 
 // ─── Extract person URN from Voyager /me response ───────────────────────────

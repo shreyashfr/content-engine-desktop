@@ -1,6 +1,6 @@
 {
   "name": "content-engine-desktop",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Content Engine Desktop App",
   "main": "electron/main.js",
   "author": "SBL <team@sbl.so>",
