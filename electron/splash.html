@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Content Engine</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #f9fafb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      color: #1f2937;
+      -webkit-app-region: drag;
+    }
+    .container {
+      text-align: center;
+      max-width: 400px;
+    }
+    .logo {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 24px;
+      background: #3657d5;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 28px;
+      font-weight: 700;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .status {
+      font-size: 14px;
+      color: #6b7280;
+      margin-bottom: 24px;
+    }
+    .progress-bar {
+      width: 280px;
+      height: 4px;
+      background: #e5e7eb;
+      border-radius: 2px;
+      margin: 0 auto;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #3657d5;
+      border-radius: 2px;
+      width: 0%;
+      animation: indeterminate 1.5s ease-in-out infinite;
+    }
+    @keyframes indeterminate {
+      0% { width: 0%; margin-left: 0; }
+      50% { width: 60%; margin-left: 20%; }
+      100% { width: 0%; margin-left: 100%; }
+    }
+    .progress-fill.determinate {
+      animation: none;
+      transition: width 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">CE</div>
+    <h1>Content Engine</h1>
+    <p class="status" id="status">Setting up for first use...</p>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress"></div>
+    </div>
+  </div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    ipcRenderer.on('setup-status', (_event, msg) => {
+      document.getElementById('status').textContent = msg;
+    });
+    ipcRenderer.on('setup-progress', (_event, pct) => {
+      const el = document.getElementById('progress');
+      el.classList.add('determinate');
+      el.style.width = pct + '%';
+    });
+  </script>
+</body>
+</html>

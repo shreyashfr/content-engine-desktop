@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "description": "Content Engine Desktop App",
   "main": "electron/main.js",
+  "author": "SBL <team@sbl.so>",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build:frontend": "cd ../content-engine && VITE_API_BASE='' npx vite build --base=/ --outDir=../content-engine-desktop/frontend-dist --emptyOutDir",
-    "pack": "npm run build:frontend && electron-builder --dir",
-    "dist": "npm run build:frontend && electron-builder"
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "dist": "electron-builder"
   },
   "dependencies": {
     "playwright-extra": "^4.3.6",
@@ -21,20 +23,55 @@
   "build": {
     "appId": "com.sbl.contentengine",
     "productName": "Content Engine",
+    "copyright": "Copyright 2024 SBL",
     "asar": false,
     "files": [
       "electron/**",
-      "frontend-dist/**"
+      "frontend-dist/**",
+      "!node_modules/**/{test,tests,__tests__,example,examples,docs}/**",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.map"
     ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Content Engine"
+    },
     "mac": {
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "build/icon.icns",
       "category": "public.app-category.productivity"
     },
-    "win": {
-      "target": "nsis"
+    "dmg": {
+      "title": "Content Engine",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
     },
     "linux": {
-      "target": "AppImage"
+      "target": ["AppImage"],
+      "icon": "build/icon.png",
+      "category": "Office"
     }
   }
 }

@@ -3,18 +3,94 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
-let mainWindow;
+let mainWindow, splashWindow;
 const FRONTEND_PORT = 15100;
 
-// ─── Serve the React frontend via a local HTTP server ───────────────────────
+// ─── Path helpers ───────────────────────────────────────────────────────────
+function getFrontendDir() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'app', 'frontend-dist');
+  }
+  return path.join(__dirname, '..', 'frontend-dist');
+}
+
+// ─── Splash screen for first-launch setup ───────────────────────────────────
+function showSplash() {
+  splashWindow = new BrowserWindow({
+    width: 420,
+    height: 320,
+    frame: false,
+    transparent: false,
+    resizable: false,
+    alwaysOnTop: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+  splashWindow.center();
+}
+
+function updateSplash(msg) {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.webContents.send('setup-status', msg);
+  }
+}
+
+function closeSplash() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+    splashWindow = null;
+  }
+}
+
+// ─── Check if Playwright Chromium is installed ──────────────────────────────
+function isChromiumInstalled() {
+  const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (!fs.existsSync(browsersDir)) return false;
+  const entries = fs.readdirSync(browsersDir);
+  return entries.some(e => e.startsWith('chromium-'));
+}
+
+async function installChromium() {
+  return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process');
+    const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const proc = spawn(npxCmd, ['playwright', 'install', 'chromium'], {
+      env: { ...process.env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    proc.stdout.on('data', (data) => {
+      const line = data.toString().trim();
+      console.log('[playwright]', line);
+      if (line.includes('Downloading')) {
+        updateSplash('Downloading browser engine...');
+      } else if (line.includes('%')) {
+        updateSplash(`Downloading browser engine... ${line}`);
+      }
+    });
+
+    proc.stderr.on('data', (data) => {
+      console.log('[playwright]', data.toString().trim());
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`Playwright install exited with code ${code}`));
+    });
+  });
+}
+
+// ─── Serve React frontend ───────────────────────────────────────────────────
 function startFrontendServer() {
-  const distDir = app.isPackaged
-    ? path.join(process.resourcesPath, 'app', 'frontend-dist')
-    : path.join(__dirname, '..', 'frontend-dist');
+  const distDir = getFrontendDir();
 
   const mimeTypes = {
     '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
     '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg', '.avif': 'image/avif', '.webp': 'image/webp',
     '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
   };
 
@@ -23,7 +99,7 @@ function startFrontendServer() {
       let filePath = path.join(distDir, req.url === '/' ? 'index.html' : req.url.split('?')[0]);
 
       if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-        filePath = path.join(distDir, 'index.html'); // SPA fallback
+        filePath = path.join(distDir, 'index.html');
       }
 
       const ext = path.extname(filePath);
@@ -47,7 +123,7 @@ function startFrontendServer() {
   });
 }
 
-// ─── LinkedIn browser helpers (stealth browser on user's own IP) ────────────
+// ─── LinkedIn browser helpers ───────────────────────────────────────────────
 async function launchLinkedInBrowser(li_at, proxyUrl) {
   const { chromium } = require('playwright-extra');
   const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -95,12 +171,10 @@ ipcMain.handle('linkedin:validate', async (_event, { li_at, proxy_url }) => {
     await page.goto('https://www.linkedin.com/feed', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000);
 
-    // Get JSESSIONID
     const cookies = await context.cookies('https://www.linkedin.com');
     const jsessionCookie = cookies.find(c => c.name === 'JSESSIONID');
     const jsessionid = jsessionCookie ? jsessionCookie.value.replace(/"/g, '') : null;
 
-    // Fetch profile from inside the browser
     const profile = await page.evaluate(async () => {
       try {
         const resp = await fetch('/voyager/api/me', {
@@ -155,7 +229,6 @@ ipcMain.handle('linkedin:post', async (_event, { li_at, jsessionid, proxy_url, c
         'Content-Type': 'application/json',
       };
 
-      // Get personUrn
       let personUrn = '';
       try {
         const meResp = await fetch('/voyager/api/me', {
@@ -240,34 +313,15 @@ ipcMain.handle('linkedin:post', async (_event, { li_at, jsessionid, proxy_url, c
   }
 });
 
-// ─── App lifecycle ──────────────────────────────────────────────────────────
-app.whenReady().then(async () => {
-  // Playwright browser path
-  process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(app.getPath('userData'), 'browsers');
-
-  // Install Chromium on first launch
-  const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (!fs.existsSync(browsersDir) || fs.readdirSync(browsersDir).length === 0) {
-    console.log('First launch: installing Chromium browser...');
-    try {
-      const { execSync } = require('child_process');
-      execSync('npx playwright install chromium', {
-        env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: browsersDir },
-        stdio: 'inherit',
-      });
-    } catch (err) {
-      console.error('Failed to install Chromium:', err.message);
-    }
-  }
-
-  await startFrontendServer();
-
+// ─── Create main app window ─────────────────────────────────────────────────
+function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1024,
     minHeight: 700,
     title: 'Content Engine',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -277,11 +331,49 @@ app.whenReady().then(async () => {
 
   mainWindow.loadURL(`http://127.0.0.1:${FRONTEND_PORT}`);
 
+  mainWindow.once('ready-to-show', () => {
+    closeSplash();
+    mainWindow.show();
+  });
+
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
   }
 
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+// ─── App lifecycle ──────────────────────────────────────────────────────────
+app.whenReady().then(async () => {
+  // Set Playwright browsers path
+  process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(app.getPath('userData'), 'browsers');
+
+  const needsSetup = !isChromiumInstalled();
+
+  if (needsSetup) {
+    showSplash();
+    updateSplash('Setting up for first use...');
+
+    try {
+      updateSplash('Downloading browser engine...');
+      await installChromium();
+      updateSplash('Almost ready...');
+    } catch (err) {
+      console.error('Chromium install failed:', err.message);
+      updateSplash('Setup failed. App will still work but LinkedIn posting may not be available.');
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+
+  // Start frontend server
+  await startFrontendServer();
+
+  // Show main window
+  createMainWindow();
 });
 
 app.on('window-all-closed', () => app.quit());
+
+app.on('activate', () => {
+  if (mainWindow === null) createMainWindow();
+});

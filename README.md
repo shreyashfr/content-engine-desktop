@@ -1,13 +1,21 @@
 # Content Engine Desktop
 
-Electron desktop app for Content Engine. All app features (research, ideation, content production) use the remote server API. LinkedIn posting runs locally on your machine via a stealth browser — no proxy needed, no session invalidation.
+Electron desktop app for Content Engine. LinkedIn posting runs locally on your machine — no proxy needed, no session invalidation.
 
-## Setup (Windows/Mac/Linux)
+## Download
 
-### 1. Install Node.js
-Download and install Node.js 18+ from https://nodejs.org
+Go to [Releases](https://github.com/shreyashfr/content-engine-desktop/releases) and download:
+- **Windows**: `Content-Engine-Setup-x.x.x.exe`
+- **Mac**: `Content-Engine-x.x.x.dmg`
 
-### 2. Download & Run
+## First Launch
+
+1. Install and open the app
+2. On first launch, it will download a browser engine (~200MB, one-time)
+3. A splash screen shows progress — wait for it to finish
+4. The app opens automatically
+
+## Building from Source
 
 ```bash
 git clone https://github.com/shreyashfr/content-engine-desktop.git
@@ -17,13 +25,25 @@ npx playwright install chromium
 npm start
 ```
 
-That's it. The app opens as a desktop window.
+## Creating Installers Locally
 
-## How LinkedIn Posting Works
+```bash
+# Windows (run on Windows)
+npm run dist:win
 
-1. Go to **Post Content** in the app
-2. Enter your LinkedIn `li_at` cookie (from browser DevTools → Application → Cookies → linkedin.com)
-3. Click **Save & Connect** — the app validates your token using a stealth browser running on YOUR machine
-4. Select an approved post and click **Post to LinkedIn** — posted from your local IP, not a server
+# Mac (run on Mac)
+npm run dist:mac
+```
 
-No proxy needed. No session invalidation. Your LinkedIn session stays safe.
+Output goes to the `dist/` folder.
+
+## Releasing
+
+Push a version tag to trigger automated builds:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+GitHub Actions builds Windows `.exe` and Mac `.dmg` automatically and creates a release.
