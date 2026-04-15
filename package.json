@@ -1,0 +1,40 @@
+{
+  "name": "content-engine-desktop",
+  "version": "1.0.0",
+  "description": "Content Engine Desktop App",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:frontend": "cd ../content-engine && VITE_API_BASE='' npx vite build --base=/ --outDir=../content-engine-desktop/frontend-dist --emptyOutDir",
+    "pack": "npm run build:frontend && electron-builder --dir",
+    "dist": "npm run build:frontend && electron-builder"
+  },
+  "dependencies": {
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.sbl.contentengine",
+    "productName": "Content Engine",
+    "asar": false,
+    "files": [
+      "electron/**",
+      "frontend-dist/**"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

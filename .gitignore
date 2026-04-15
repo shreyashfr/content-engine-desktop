@@ -1,0 +1,8 @@
+node_modules/
+frontend-dist/
+dist/
+build/
+*.dmg
+*.exe
+*.AppImage
+.DS_Store
