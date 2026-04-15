@@ -109,7 +109,7 @@ async function startFrontendServer() {
 }
 
 // ─── LinkedIn API helpers ───────────────────────────────────────────────────
-function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }) {
+function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }, redirectCount = 0) {
   const https = require('https');
   const parsed = new URL(url);
   return new Promise((resolve, reject) => {
@@ -131,10 +131,18 @@ function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }) 
       else options.headers['content-length'] = body.length;
     }
     const req = https.request(options, (res) => {
+      // Follow redirects (up to 5)
+      if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) && res.headers.location && redirectCount < 5) {
+        const redirectUrl = res.headers.location.startsWith('http') ? res.headers.location : `https://${parsed.hostname}${res.headers.location}`;
+        console.log(`[linkedin] Redirect ${res.statusCode} -> ${redirectUrl}`);
+        resolve(linkedInRequest(method, redirectUrl, { li_at, jsessionid, body, contentType }, redirectCount + 1));
+        return;
+      }
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
         const raw = Buffer.concat(chunks).toString();
+        console.log(`[linkedin] ${method} ${parsed.pathname} -> ${res.statusCode} (${raw.length} bytes)`);
         try { resolve({ status: res.statusCode, data: JSON.parse(raw) }); }
         catch { resolve({ status: res.statusCode, data: raw }); }
       });
@@ -176,8 +184,10 @@ ipcMain.handle('linkedin:validate', async (_event, { li_at }) => {
   try {
     const res = await linkedInRequest('GET', 'https://www.linkedin.com/voyager/api/me', { li_at, jsessionid: 'ajax:0' });
     console.log('[linkedin] validate status:', res.status);
-    console.log('[linkedin] response keys:', JSON.stringify(Object.keys(res.data || {})));
-    if (res.status !== 200) return { valid: false, error: 'Invalid or expired token' };
+    const isString = typeof res.data === 'string';
+    console.log('[linkedin] response type:', isString ? 'string' : 'json', isString ? res.data.substring(0, 200) : JSON.stringify(Object.keys(res.data || {})));
+    if (res.status !== 200) return { valid: false, error: `Invalid or expired token (HTTP ${res.status})` };
+    if (isString) return { valid: false, error: 'LinkedIn returned non-JSON response. Token may be expired.' };
     const raw = res.data;
     const profile = raw.data || raw; // handle normalized wrapper
     const mini = profile.miniProfile || {};
@@ -207,7 +217,10 @@ ipcMain.handle('linkedin:post', async (_event, { li_at, jsessionid, content, ima
     if (meRes.status !== 200) return { success: false, error: 'Could not resolve LinkedIn profile' };
     console.log('[linkedin] /me for post, keys:', JSON.stringify(Object.keys(meRes.data)));
     const personUrn = extractPersonUrn(meRes.data);
-    if (!personUrn) return { success: false, error: 'Could not resolve LinkedIn profile URN. Response: ' + JSON.stringify(Object.keys(meRes.data)) };
+    if (!personUrn) {
+      const snippet = typeof meRes.data === 'string' ? meRes.data.substring(0, 200) : JSON.stringify(meRes.data).substring(0, 200);
+      return { success: false, error: `Could not resolve profile URN (status ${meRes.status}). Response: ${snippet}` };
+    }
 
     // Upload image if present
     let imageUrn = null;
