@@ -7,46 +7,17 @@ Electron desktop app for Content Engine. All app features (research, ideation, c
 ### 1. Install Node.js
 Download and install Node.js 18+ from https://nodejs.org
 
-### 2. Download & Install
+### 2. Download & Run
 
 ```bash
-# Clone the repo
 git clone https://github.com/shreyashfr/content-engine-desktop.git
 cd content-engine-desktop
-
-# Install dependencies
 npm install
-
-# Install Playwright browser (one-time)
 npx playwright install chromium
-```
-
-### 3. Build the frontend
-
-You need the `content-engine` React app repo cloned as a sibling folder:
-
-```bash
-# Clone the frontend repo next to this folder
-cd ..
-git clone https://github.com/shreyashfr/content-engine.git
-cd content-engine
-npm install
-cd ../content-engine-desktop
-
-# Build the frontend for Electron
-npm run build:frontend
-```
-
-### 4. Run the app
-
-```bash
 npm start
 ```
 
-To run with DevTools open:
-```bash
-npm run dev
-```
+That's it. The app opens as a desktop window.
 
 ## How LinkedIn Posting Works
 
