@@ -355,7 +355,11 @@ app.whenReady().then(async () => {
     console.log('Auto-update error:', err.message);
   });
 
+  // Check for updates on launch and every 30 minutes
   autoUpdater.checkForUpdates().catch(() => {});
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 30 * 60 * 1000);
 });
 
 app.on('window-all-closed', () => app.quit());
