@@ -79,7 +79,10 @@ async function startFrontendServer() {
   FRONTEND_PORT = await findAvailablePort(FRONTEND_PORT);
 
   const server = http.createServer((req, res) => {
-    let filePath = path.join(distDir, req.url === '/' ? 'index.html' : req.url.split('?')[0]);
+    // Strip /ce/ prefix — vite builds with base: '/ce/' for the web server
+    let urlPath = req.url.split('?')[0];
+    if (urlPath.startsWith('/ce/')) urlPath = urlPath.slice(3);
+    let filePath = path.join(distDir, urlPath === '/' ? 'index.html' : urlPath);
 
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       filePath = path.join(distDir, 'index.html');
