@@ -7,12 +7,13 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "dist:win": "electron-builder --win --publish never",
-    "dist:mac": "electron-builder --mac --publish never",
-    "dist:linux": "electron-builder --linux --publish never",
+    "dist:win": "electron-builder --win --publish always",
+    "dist:mac": "electron-builder --mac --publish always",
+    "dist:linux": "electron-builder --linux --publish always",
     "dist": "electron-builder"
   },
   "dependencies": {
+    "electron-updater": "^6.3.0",
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
@@ -31,6 +32,13 @@
       "!node_modules/**/{test,tests,__tests__,example,examples,docs}/**",
       "!node_modules/**/*.md",
       "!node_modules/**/*.map"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "shreyashfr",
+        "repo": "content-engine-desktop"
+      }
     ],
     "win": {
       "target": [

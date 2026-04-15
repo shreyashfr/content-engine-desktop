@@ -22,16 +22,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Windows installer
+      - name: Build and publish Windows installer
         run: npm run dist:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: dist/*.exe
 
   build-mac:
     runs-on: macos-latest
@@ -45,29 +39,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Mac installer
+      - name: Build and publish Mac installer
         run: npm run dist:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mac-installer
-          path: dist/*.zip
-
-  release:
-    needs: [build-windows, build-mac]
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && (needs.build-windows.result == 'success' || needs.build-mac.result == 'success') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            windows-installer/*.exe
-            mac-installer/*.zip
-          generate_release_notes: true

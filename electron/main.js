@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow, splashWindow;
 let FRONTEND_PORT = 15100;
@@ -391,6 +392,36 @@ app.whenReady().then(async () => {
 
   // Show main window
   createMainWindow();
+
+  // ─── Auto-updater ──────────────────────────────────────────────────────────
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('Update available:', info.version);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', { status: 'downloading', version: info.version });
+    }
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded:', info.version);
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Ready',
+      message: `Version ${info.version} has been downloaded.`,
+      detail: 'The update will be installed when you restart the app.',
+      buttons: ['Restart Now', 'Later'],
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.log('Auto-update error:', err.message);
+  });
+
+  autoUpdater.checkForUpdates().catch(() => {});
 });
 
 app.on('window-all-closed', () => app.quit());
