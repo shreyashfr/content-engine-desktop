@@ -145,12 +145,39 @@ function linkedInRequest(method, url, { li_at, jsessionid, body, contentType }) 
   });
 }
 
+// ─── Extract person URN from Voyager /me response ───────────────────────────
+function extractPersonUrn(data) {
+  // Try miniProfile.entityUrn (most common)
+  const urn = data.miniProfile?.entityUrn || data.entityUrn || data.publicIdentifier || '';
+  // urn:li:fs_miniProfile:ACoAAxxxxxx or urn:li:member:xxxxx
+  const match = urn.match(/urn:li:(?:fs_miniProfile|member):(.+)/);
+  if (match) return `urn:li:person:${match[1]}`;
+  // Try included entities
+  if (data.included) {
+    for (const entity of data.included) {
+      const eUrn = entity.entityUrn || entity['$id'] || '';
+      const eMatch = eUrn.match(/urn:li:(?:fs_miniProfile|member):(.+)/);
+      if (eMatch) return `urn:li:person:${eMatch[1]}`;
+    }
+  }
+  // Try plainId directly
+  if (data.plainId) return `urn:li:person:${data.plainId}`;
+  if (data.miniProfile?.objectUrn) {
+    const oMatch = data.miniProfile.objectUrn.match(/urn:li:member:(.+)/);
+    if (oMatch) return `urn:li:person:${oMatch[1]}`;
+  }
+  return null;
+}
+
 // ─── IPC: Validate LinkedIn token ───────────────────────────────────────────
 ipcMain.handle('linkedin:validate', async (_event, { li_at }) => {
   try {
     const res = await linkedInRequest('GET', 'https://www.linkedin.com/voyager/api/me', { li_at, jsessionid: 'ajax:0' });
     if (res.status !== 200) return { valid: false, error: 'Invalid or expired token' };
     const profile = res.data;
+    console.log('[linkedin] /me response keys:', JSON.stringify(Object.keys(profile)));
+    console.log('[linkedin] miniProfile:', JSON.stringify(profile.miniProfile || 'none'));
+    const personUrn = extractPersonUrn(profile);
     const firstName = profile.miniProfile?.firstName || profile.plainId || '';
     const lastName = profile.miniProfile?.lastName || '';
     return {
@@ -158,6 +185,7 @@ ipcMain.handle('linkedin:validate', async (_event, { li_at }) => {
       jsessionid: 'ajax:0',
       profileName: `${firstName} ${lastName}`.trim() || 'Connected',
       profileId: profile.miniProfile?.entityUrn || profile.plainId || '',
+      personUrn: personUrn || '',
     };
   } catch (err) {
     console.error('LinkedIn validate error:', err.message);
@@ -171,10 +199,9 @@ ipcMain.handle('linkedin:post', async (_event, { li_at, jsessionid, content, ima
     // Get profile URN
     const meRes = await linkedInRequest('GET', 'https://www.linkedin.com/voyager/api/me', { li_at, jsessionid });
     if (meRes.status !== 200) return { success: false, error: 'Could not resolve LinkedIn profile' };
-    const urn = meRes.data.miniProfile?.entityUrn || '';
-    const match = urn.match(/urn:li:(?:fs_miniProfile|member):(.+)/);
-    if (!match) return { success: false, error: 'Could not resolve LinkedIn profile URN' };
-    const personUrn = `urn:li:person:${match[1]}`;
+    console.log('[linkedin] /me for post, keys:', JSON.stringify(Object.keys(meRes.data)));
+    const personUrn = extractPersonUrn(meRes.data);
+    if (!personUrn) return { success: false, error: 'Could not resolve LinkedIn profile URN. Response: ' + JSON.stringify(Object.keys(meRes.data)) };
 
     // Upload image if present
     let imageUrn = null;
